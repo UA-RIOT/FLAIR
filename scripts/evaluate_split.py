@@ -7,7 +7,7 @@ Reports full metrics on the test set with per-attack-type breakdown.
 
 Usage:
     python scripts/evaluate_split.py --split 80_10_10
-    python scripts/evaluate_split.py --split 75_15_15
+    python scripts/evaluate_split.py --split 70_15_15
     python scripts/evaluate_split.py --split 60_20_20
 
 Outputs (per split):
