@@ -1,6 +1,68 @@
-# FLAIR — Flow-Level Autoencoder for Intrusion Recognition
+# F.L.A.I.R — Flow-Level Autoencoder for Intrusion Recognition
 
-FLAIR is a GRU-based autoencoder for unsupervised anomaly detection on network flow data. It is trained exclusively on normal traffic and flags anomalies by measuring how poorly it reconstructs a window of flows. This repository implements FLAIR for the **WUSTL-IIoT** dataset using the 24 selected features from Table III of the paper (3 categorical + 21 numeric).
+FLAIR is an unsupervised anomaly detection system for Industrial IoT (IIoT) network traffic. It uses a GRU-based autoencoder trained exclusively on normal traffic to detect intrusions by measuring how poorly it reconstructs a sliding window of network flows. No attack labels are used during training.
+
+This project was developed as an undergraduate honors thesis at the University of Arkansas, evaluated on the WUSTL-IIoT-2021 dataset.
+
+---
+
+## Results (Primary Split: 80/10/10)
+
+| Metric | Operational Threshold | Best-F1 Threshold (Upper Bound) |
+|--------|-----------------------|----------------------------------|
+| Accuracy | 98.96% | — |
+| Precision | 88.79% | 97.02% |
+| Recall (TPR) | 98.08% | 95.01% |
+| F1 Score | 93.20% | 96.00% |
+| FPR | 0.97% | — |
+| ROC AUC | 0.9994 | — |
+| PR AUC | 0.9932 | — |
+
+**Per-attack-type detection @ operational threshold:**
+
+| Attack Type | Detected | Total | Rate |
+|-------------|----------|-------|------|
+| DoS | 7,491 | 7,530 | 99.5% |
+| Reconnaissance | 683 | 792 | 86.2% |
+| Command Injection | 21 | 26 | 80.8% |
+| Backdoor | 13 | 21 | 61.9% |
+
+Threshold set at the 99th percentile of normal-window anomaly scores from the validation set (no attack labels used).
+
+### Cross-Split Robustness
+
+| Split | F1 | ROC AUC | PR AUC |
+|-------|----|---------|--------|
+| 80/10/10 | 93.20% | 0.9994 | 0.9932 |
+| 70/15/15 | 92.68% | 0.9991 | 0.9877 |
+| 60/20/20 | 92.53% | 0.9992 | 0.9904 |
+
+F1 never drops below 92.5% and ROC AUC never below 0.999 across all splits, demonstrating that FLAIR is robust to the choice of train/test split ratio.
+
+---
+
+## Dataset
+
+**WUSTL-IIoT-2021** — a network flow dataset collected from an industrial IoT testbed.
+
+| Stat | Value |
+|------|-------|
+| Total flows | 1,194,464 |
+| Total windows (T=10, stride=1) | 1,194,455 |
+| Normal windows | 1,065,874 (89.2%) |
+| Attack windows | 128,581 (10.8%) |
+| Attack rate (flow-level) | 7.28% |
+
+Attack type distribution:
+
+| Type | Share of attacks |
+|------|-----------------|
+| DoS | 89.98% |
+| Reconnaissance | 9.46% |
+| Command Injection | 0.31% |
+| Backdoor | 0.25% |
+
+The dataset is not included in this repository. Download it separately and set the path in `config.yaml`.
 
 ---
 
@@ -8,169 +70,200 @@ FLAIR is a GRU-based autoencoder for unsupervised anomaly detection on network f
 
 ```
 FLAIR/
-├── config.yaml                        # Single source of truth for all settings
-├── requirements.txt                   # Python dependencies
+├── config.yaml                          # All settings — paths, hyperparameters, features
+├── requirements.txt                     # Python dependencies
 │
 ├── scripts/
-│   └── preprocess_data.py             # Step 1: raw CSV/XLSX → preprocessed.npz
+│   ├── preprocess_data.py               # Step 1: raw CSV → preprocessed.npz
+│   ├── extract_window_types.py          # Extract per-window attack type labels
+│   ├── create_splits_retrain.py         # Build 80/10/10, 70/15/15, 60/20/20 split indices
+│   ├── train_split.py                   # Train on a pre-computed split
+│   ├── evaluate_split.py                # Evaluate on a split's held-out test set
+│   ├── create_splits.py                 # Temporal holdout split (no retraining)
+│   ├── evaluate_holdout.py              # Re-report metrics on held-out 10% test set
+│   ├── export_onnx.py                   # (experimental) Export trained model to ONNX
+│   └── infer_realtime.py                # (experimental) Real-time inference — incomplete
 │
 ├── src/
 │   ├── data/
-│   │   ├── feature_definitions.py     # Feature name lists (categorical + numeric)
-│   │   ├── dataset.py                 # PyTorch Dataset (FLAIRDataset)
-│   │   ├── flow_extractor.py          # Raw flow parsing utilities
-│   │   ├── flow_window_builder.py     # Sliding-window construction helpers
-│   │   └── normalization.py           # Z-score normalization utilities
+│   │   ├── feature_definitions.py       # Feature name lists (3 categorical + 21 numeric)
+│   │   ├── dataset.py                   # PyTorch FLAIRDataset
+│   │   └── flow_window_builder.py       # Sliding-window construction helpers
 │   │
 │   ├── models/
-│   │   ├── flair_model.py             # Top-level FLAIRAutoencoder + FLAIRConfig
-│   │   ├── encoder.py                 # GRUEncoder
-│   │   ├── decoder.py                 # GRUDecoder
-│   │   └── attention.py               # (Optional) attention module
+│   │   ├── flair_model.py               # FLAIRAutoencoder + FLAIRConfig
+│   │   ├── encoder.py                   # GRUEncoder
+│   │   └── decoder.py                   # GRUDecoder with categorical output heads
 │   │
-│   ├── training/
-│   │   ├── train_flair.py             # Step 2: train on normal windows
-│   │   ├── evaluate_flair.py          # Step 3: anomaly scores + metrics
-│   │   └── thresholding.py            # Threshold selection utilities
-│   │
-│   └── analysis/
-│       ├── anomaly_analysis.py        # Post-hoc analysis helpers
-│       ├── metrics.py                 # Evaluation metrics (F1, ROC, PR)
-│       └── plots.py                   # Plotting utilities
+│   └── training/
+│       ├── train_flair.py               # Training loop with early stopping
+│       └── evaluate_flair.py            # Metrics: F1, ROC AUC, PR AUC, confusion matrix
+│
+├── demo/
+│   ├── app.py                           # Streamlit live demo GUI
+│   ├── inference.py                     # Model loader + per-window inference
+│   ├── visualizations.py                # Plotly chart builders
+│   └── requirements_demo.txt            # Demo-specific dependencies
 │
 ├── data/
-│   └── processed/
-│       └── preprocessed.npz           # Output of Step 1 (generated, not committed)
+│   └── processed/                       # Generated files (not committed)
+│       ├── preprocessed.npz
+│       ├── window_types.npy
+│       └── splits_*.npz
 │
 └── experiments/
-    └── results/
-        ├── flair_minimal.pt           # Saved model checkpoint (generated)
-        └── anomaly_scores.csv         # Per-window anomaly scores (generated)
+    └── results/                         # Generated files (not committed)
+        ├── flair_minimal.pt             # Original model checkpoint
+        ├── flair_80_10_10.pt            # Split-specific checkpoints
+        ├── flair_70_15_15.pt
+        ├── flair_60_20_20.pt
+        ├── anomaly_scores_full.csv      # All-window scores for demo
+        ├── scores_*.csv                 # Per-split test set scores
+        └── metrics_*.txt                # Per-split evaluation reports
 ```
-
----
-
-## Features
-
-FLAIR uses **24 flow-level features** (matching Table III of the paper):
-
-| Type | Features |
-|------|----------|
-| **Categorical** (embedded) | `Sport`, `Dport`, `Proto` |
-| **Numeric** (z-score normalized) | `Mean`, `SrcPkts`, `DstPkts`, `TotPkts`, `SrcBytes`, `DstBytes`, `TotBytes`, `SrcLoad`, `DstLoad`, `Load`, `SrcRate`, `DstRate`, `Rate`, `SrcLoss`, `DstLoss`, `Loss`, `pLoss`, `SrcJitter`, `DstJitter`, `SIntPkt`, `DIntPkt` |
-
-Categorical features are mapped to integer IDs and passed through learned `nn.Embedding` layers. Numeric features are z-score normalized using **normal-traffic rows only** (label = 0). The model reconstructs numeric features only; anomaly score is per-window MSE reconstruction error.
-
----
-
-## Configuration
-
-All pipeline settings live in [`config.yaml`](config.yaml). Edit this file to change paths, hyperparameters, or feature lists — no code changes needed.
-
-Key sections:
-
-```yaml
-features:          # Which columns are categorical vs numeric
-preprocess:        # window_size, stride, sort_time, dropna
-paths:             # Input dataset path and output .npz path
-model:             # hidden_dim, num_layers, dropout, bidirectional
-training:          # batch_size, learning_rate, epochs, seed, device, checkpoint_path
-evaluation:        # threshold_percentile, output_csv
-```
-
----
-
-## Environment Setup
-
-### Requirements
-
-- Python 3.10 or 3.11 (recommended)
-- PyTorch 2.10.0
-- See [`requirements.txt`](requirements.txt) for the full pinned dependency list
-
-### Create and activate a virtual environment
-
-**Windows (PowerShell / CMD):**
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-**macOS / Linux:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-> **GPU training:** If you have a CUDA-capable GPU, install the matching CUDA-enabled build of PyTorch from [pytorch.org](https://pytorch.org/get-started/locally/) before running `pip install -r requirements.txt`. Then set `device: "cuda"` in `config.yaml`.
-
----
-
-## Pipeline
-
-All three steps are driven by `config.yaml` and should be run from the **repository root**.
-
-### Step 1 — Preprocess
-
-Reads the raw WUSTL-IIoT dataset (`.xlsx` or `.csv`), builds vocabularies for the categorical features, z-score normalizes numeric features on normal rows, and produces sliding-window sequences saved as a single `.npz` bundle.
-
-```bash
-python -m scripts.preprocess_data
-```
-
-Output: `data/processed/preprocessed.npz` containing:
-- `X_num` — `(N, T, 21)` normalized numeric windows
-- `X_cat` — `(N, T, 3)` categorical ID windows (Sport, Dport, Proto)
-- `y_seq` — `(N,)` window-level labels
-- `sport_vocab`, `dport_vocab`, `proto_vocab` — value-to-ID mappings
-- `mu`, `sigma` — normalization statistics (computed on normal rows only)
-
-### Step 2 — Train
-
-Loads the `.npz` bundle, filters to normal-only windows, splits into train/val, and trains the GRU autoencoder with early stopping. Saves the best checkpoint.
-
-```bash
-python -m src.training.train_flair
-```
-
-Output: `experiments/results/flair_minimal.pt`
-
-### Step 3 — Evaluate
-
-Loads the saved checkpoint and `.npz` bundle, computes per-window reconstruction error (anomaly score), applies a percentile threshold derived from normal windows, and reports full metrics.
-
-```bash
-python -m src.training.evaluate_flair
-```
-
-Output: `experiments/results/anomaly_scores.csv` and printed metrics:
-- Confusion matrix, Accuracy, Precision, Recall, F1, FPR
-- ROC AUC and PR AUC (threshold-independent)
-- Best-F1 threshold (label-informed upper bound for reporting)
 
 ---
 
 ## Model Architecture
 
 ```
-x_num (B, T, 21)  ──────────────────────────────────────────┐
-x_cat (B, T, 3)   → Embedding(Sport) ┐                      │
-                  → Embedding(Dport) ├─ concat → x_in (B,T,D)─→ GRUEncoder → latent
-                  → Embedding(Proto) ┘                              │
-                                                             GRUDecoder
-                                                                    │
-                                                          x_hat_num (B, T, 21)
-                                                                    │
-                                              Anomaly score = MSE(x_num, x_hat_num)
+Input: x_num (B, T, 21)  +  x_cat (B, T, 3)
+            │                       │
+            │         ┌─────────────┴──────────────┐
+            │    Embed(Sport, 8D)  Embed(Dport, 8D)  Embed(Proto, 8D)
+            │         └─────────────┬──────────────┘
+            └──────────────────────►│
+                            concat → x_in (B, T, 45)
+                                     │
+                              GRU Encoder
+                                     │
+                              latent (B, 128)
+                                     │
+                              GRU Decoder
+                                     │
+                    ┌────────────────┼────────────────┐
+               x_hat_num         sport_logits    dport_logits
+               (B, T, 21)        (B, T, 51058)  (B, T, 7782)   proto_logits (B, T, 9)
+
+Anomaly score = MSE(x_num, x_hat_num) + 0.1 × mean(CE_sport + CE_dport + CE_proto) / log(vocab_size)
 ```
 
-- **Encoder:** multi-layer GRU, optionally bidirectional
-- **Decoder:** GRU that expands the final latent state back to sequence length
-- **Loss:** mean squared error on numeric reconstruction (categorical features are not reconstructed)
-- **Anomaly score:** mean per-timestep MSE across all 21 numeric features, giving one scalar per window
+| Component | Detail |
+|-----------|--------|
+| Embeddings | Sport (51,058×8), Dport (7,782×8), Proto (9×8) |
+| Input dim | 21 + 8+8+8 = 45 |
+| GRU hidden | 128 |
+| Layers | 1 |
+| Dropout | 0.1 |
+| Loss | MSE + 0.1 × normalized cross-entropy (categorical heads) |
+| Threshold | 99th percentile of normal-window scores (val set) |
+
+---
+
+## Setup
+
+```bash
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+GPU training requires PyTorch with CUDA support. Set `device: "cuda"` in `config.yaml`.
+
+---
+
+## Pipeline
+
+All commands run from the repository root.
+
+### 1 — Preprocess
+
+```bash
+python -m scripts.preprocess_data
+```
+
+Reads the raw CSV, builds categorical vocabularies, z-score normalizes numeric features on normal rows only, and produces sliding-window sequences.
+
+Output: `data/processed/preprocessed.npz`
+
+### 2 — Train (original)
+
+```bash
+python -m src.training.train_flair
+```
+
+Trains on normal-only windows with 90/10 internal train/val split and early stopping.
+
+Output: `experiments/results/flair_minimal.pt`
+
+### 3 — Evaluate (original)
+
+```bash
+python -m src.training.evaluate_flair
+```
+
+Output: `experiments/results/anomaly_scores.csv`, `anomaly_scores_full.csv`, and printed metrics.
+
+### 4 — Train/Evaluate on held-out splits
+
+```bash
+# Extract attack type labels (run once)
+python scripts/extract_window_types.py
+
+# Build split index files (run once)
+python scripts/create_splits_retrain.py
+
+# Train and evaluate each split
+python scripts/train_split.py --split 80_10_10
+python scripts/evaluate_split.py --split 80_10_10
+
+python scripts/train_split.py --split 70_15_15
+python scripts/evaluate_split.py --split 70_15_15
+
+python scripts/train_split.py --split 60_20_20
+python scripts/evaluate_split.py --split 60_20_20
+```
+
+### 5 — Holdout evaluation without retraining
+
+```bash
+python scripts/create_splits.py
+python scripts/evaluate_holdout.py
+```
+
+Re-reports metrics on the held-out last 10% of windows using pre-computed scores from `anomaly_scores_full.csv`.
+
+### 6 — Export to ONNX *(experimental, incomplete)*
+
+> **Note:** ONNX export and real-time inference are purely experimental and have not been completed. The scripts below exist as a starting point for future work but are not part of the evaluated pipeline.
+
+```bash
+python scripts/export_onnx.py
+python scripts/infer_realtime.py --onnx flair_minimal.onnx --meta deploy_meta.npz --mode batch --npz preprocessed.npz
+python scripts/infer_realtime.py --onnx flair_minimal.onnx --meta deploy_meta.npz --mode stream
+```
+
+### 8 — Live demo
+
+```bash
+pip install streamlit plotly
+streamlit run demo/app.py
+```
+
+Opens a browser-based interactive demo with heatmaps, latent vector visualization, reconstruction comparison, and an anomaly gauge.
+
+---
+
+## Configuration Reference
+
+All settings in [`config.yaml`](config.yaml):
+
+| Section | Key settings |
+|---------|-------------|
+| `features` | `categorical`, `numeric` — feature column names |
+| `data` | `time_column`, `label_column` |
+| `preprocess` | `window_size` (10), `stride` (1), `sort_time`, `dropna` |
+| `model` | `hidden_dim` (128), `embed_dim` (8), `num_layers`, `dropout`, `cat_loss_weight` |
+| `training` | `batch_size` (512), `learning_rate` (0.001), `epochs` (32), `patience` (10), `amp`, `device` |
+| `evaluation` | `threshold_percentile` (99), `output_csv` |
+| `paths` | `full_csv`, `processed_npz`, `checkpoint_path` |
