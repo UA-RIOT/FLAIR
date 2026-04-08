@@ -1,0 +1,29 @@
+FLAIR Evaluation — Split 60_20_20
+============================================================
+Checkpoint:   experiments/results/flair_60_20_20.pt
+Val windows:  213,175 (normal only, used for threshold)
+Test windows: 229,913  (normal + attack)
+Threshold (p99 val normal): 0.356541
+
+=== Metrics @ operational threshold ===
+Confusion: TP=16414  FP=2328  TN=210847  FN=324
+Accuracy:  0.988465
+Precision: 0.875787
+Recall:    0.980643  (TPR)
+F1:        0.925254
+FPR:       0.010921
+
+=== Threshold-independent metrics ===
+ROC AUC: 0.999150
+PR  AUC: 0.990353
+
+=== Best-F1 threshold (label-informed upper bound) ===
+Best threshold: 1.206461
+Confusion: TP=15760  FP=870  TN=212305  FN=978
+Precision: 0.947685  Recall: 0.941570  F1: 0.944618
+
+=== Per-attack-type detection rate @ operational threshold ===
+  DoS                      : 15,045 / 15,061  (99.9%)
+  Reconn                   :  1,291 /  1,583  (81.6%)
+  CommInj                  :     46 /     52  (88.5%)
+  Backdoor                 :     32 /     42  (76.2%)
