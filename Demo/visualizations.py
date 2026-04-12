@@ -1,5 +1,5 @@
 """
-demo/visualizations.py
+Demo/visualizations.py
 
 Pure Plotly chart builders — no Streamlit imports.
 All functions return a plotly.graph_objects.Figure.
@@ -7,7 +7,7 @@ All functions return a plotly.graph_objects.Figure.
 
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 import plotly.graph_objects as go
@@ -182,5 +182,106 @@ def anomaly_gauge(score: float, threshold: float) -> go.Figure:
     fig.update_layout(
         height=280,
         margin=dict(l=30, r=30, t=60, b=20),
+    )
+    return fig
+
+
+def embedding_fusion_diagram(fused_input: np.ndarray, num_feature_names: List[str]) -> go.Figure:
+    """
+    Bar chart of the 45-dim fused GRU input (averaged over 10 timesteps).
+
+    fused_input: (10, 45) — output of model._combine_inputs()
+    Layout of the 45 dims: [0..20] numeric | [21..28] Sport emb | [29..36] Dport emb | [37..44] Proto emb
+    """
+    avg = fused_input.mean(axis=0)  # (45,)
+
+    labels = num_feature_names[:21] + [f"Sport-{i}" for i in range(8)] + \
+             [f"Dport-{i}" for i in range(8)] + [f"Proto-{i}" for i in range(8)]
+
+    colors = (
+        ["#7f8c8d"] * 21 +   # numeric — gray
+        ["#2980b9"] * 8  +   # Sport emb — blue
+        ["#27ae60"] * 8  +   # Dport emb — green
+        ["#e67e22"] * 8      # Proto emb — orange
+    )
+
+    fig = go.Figure(
+        go.Bar(
+            x=list(range(45)),
+            y=avg,
+            marker_color=colors,
+            hovertext=labels,
+            hovertemplate="%{hovertext}: %{y:.4f}<extra></extra>",
+        )
+    )
+
+    for x_pos in [20.5, 28.5, 36.5]:
+        fig.add_vline(x=x_pos, line_width=1.5, line_dash="dash", line_color="#bdc3c7")
+
+    for x_center, txt, color in [
+        (10,   "Numeric (21)", "#7f8c8d"),
+        (24.5, "Sport (8)",    "#2980b9"),
+        (32.5, "Dport (8)",    "#27ae60"),
+        (40.5, "Proto (8)",    "#e67e22"),
+    ]:
+        fig.add_annotation(
+            x=x_center, y=1.08, xref="x", yref="paper",
+            text=f"<b>{txt}</b>", showarrow=False,
+            font=dict(size=10, color=color),
+        )
+
+    fig.update_layout(
+        title="Feature Fusion — 45-Dim GRU Input (averaged over 10 flows)",
+        xaxis=dict(title="Dimension index", tickvals=list(range(0, 45, 5)),
+                   ticktext=[str(i) for i in range(0, 45, 5)]),
+        yaxis=dict(title="Activation (z-score / embedding units)"),
+        height=260,
+        margin=dict(l=50, r=20, t=70, b=50),
+        showlegend=False,
+    )
+    return fig
+
+
+def per_attack_bar(detection_rates: Dict[str, float]) -> go.Figure:
+    """
+    Horizontal bar chart of per-attack-type detection rates (80/10/10 split).
+
+    detection_rates: {'DoS': 99.5, 'Reconn': 86.2, 'CommInj': 80.8, 'Backdoor': 61.9}
+    """
+    attack_types = list(detection_rates.keys())
+    rates        = list(detection_rates.values())
+
+    bar_colors = []
+    for r in rates:
+        if r >= 95:
+            bar_colors.append("#2ecc71")
+        elif r >= 80:
+            bar_colors.append("#f39c12")
+        else:
+            bar_colors.append("#e74c3c")
+
+    fig = go.Figure(
+        go.Bar(
+            x=rates,
+            y=attack_types,
+            orientation="h",
+            marker_color=bar_colors,
+            text=[f"{r:.1f}%" for r in rates],
+            textposition="outside",
+        )
+    )
+
+    for x_val, label, color in [(80, "80%", "#f39c12"), (95, "95%", "#2ecc71")]:
+        fig.add_vline(x=x_val, line_width=1.5, line_dash="dot", line_color=color,
+                      annotation_text=label, annotation_position="top",
+                      annotation_font=dict(color=color, size=11))
+
+    fig.update_layout(
+        title="Per-Attack-Type Detection Rate (80/10/10 Test Set)",
+        xaxis=dict(title="Detection Rate (%)", range=[0, 110]),
+        yaxis=dict(title="Attack Type", autorange="reversed"),
+        height=260,
+        margin=dict(l=90, r=60, t=50, b=50),
+        showlegend=False,
     )
     return fig

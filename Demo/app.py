@@ -1,179 +1,259 @@
 """
-demo/app.py
+Demo/app.py
 
-FLAIR Live Demo — Streamlit GUI
-Interactive visualization of the FLAIR anomaly detection pipeline.
+FLAIR — Introduction & Project Overview
+Static landing page. No inference is run here.
 
 Run from the project root:
-    streamlit run demo/app.py
+    streamlit run Demo/app.py
+Then click "1 Architecture Explainer" in the sidebar to interact with the model.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
 import streamlit as st
-
-# Make sure project root is on the path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import demo.inference as inference
-from demo.visualizations import (
-    input_heatmap,
-    latent_bar,
-    reconstruction_comparison,
-    anomaly_gauge,
-)
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="FLAIR — Anomaly Detection Demo",
-    page_icon="🔍",
+    page_title="FLAIR — Introduction",
+    page_icon="🔬",
     layout="wide",
 )
 
 # ---------------------------------------------------------------------------
-# Load model and data (cached — runs once)
+# Header
 # ---------------------------------------------------------------------------
-@st.cache_resource(show_spinner="Loading FLAIR model and computing scores...")
-def load_everything():
-    inference.ensure_loaded()
-    return True
-
-
-load_everything()
+st.title("F.L.A.I.R.")
+st.subheader("Flow-Level Autoencoder for Intrusion Recognition")
+st.caption("University of Arkansas · RIOT Lab (Secure and Trustworthy Robotics and Embedded Systems)")
+st.divider()
 
 # ---------------------------------------------------------------------------
-# Sidebar
+# Section 1 — The Problem
 # ---------------------------------------------------------------------------
-with st.sidebar:
-    st.title("F.L.A.I.R")
-    st.caption("Flow-Level Autoencoder for Intrusion Recognition")
-    st.divider()
+st.header("The Problem")
 
-    filter_mode = st.radio(
-        "Window filter",
-        options=["All", "Normal", "Attack"],
-        index=0,
-        help="Filter the slider to show only normal, only attack, or all windows.",
+col_prob, col_stat = st.columns([2, 1])
+
+with col_prob:
+    st.markdown(
+        "Industrial Control Systems (ICS) and Industrial Internet-of-Things (IIoT) "
+        "devices — sensors, PLCs, RTUs, and actuators — form the backbone of critical "
+        "infrastructure: power grids, water treatment, manufacturing, and nuclear "
+        "facilities. Unlike enterprise IT networks, these environments prioritize "
+        "**availability and determinism** over confidentiality, leaving them "
+        "increasingly exposed as they connect to broader networks.\n\n"
+        "Cyberattacks targeting ICS environments have grown in both frequency and "
+        "sophistication. Detecting these attacks is uniquely challenging because:\n\n"
+        "- **Normal ICS traffic is highly repetitive** — devices communicate in fixed "
+        "polling cycles with predictable patterns.\n"
+        "- **Labeled attack data is scarce** — supervised methods require large "
+        "labeled datasets, which are difficult to obtain in operational environments.\n"
+        "- **Attack patterns are diverse** — from high-volume DoS floods to subtle "
+        "backdoor communication that mimics normal traffic.\n"
+        "- **False alarms are costly** — unnecessary shutdowns of industrial processes "
+        "can be as damaging as the attacks themselves."
     )
 
-    available_idx = inference.get_indices(filter_mode)  # type: ignore[arg-type]
-    n_available = len(available_idx)
-
-    if n_available == 0:
-        st.error("No windows match the selected filter.")
-        st.stop()
-
-    slider_pos = st.slider(
-        f"Window ({filter_mode}, {n_available:,} total)",
-        min_value=0,
-        max_value=n_available - 1,
-        value=0,
-        step=1,
+with col_stat:
+    st.info(
+        "**WUSTL-IIoT-2021 Dataset**\n\n"
+        "University of Washington St. Louis\n\n"
+        "~1.19 million network flow windows\n\n"
+        "4 attack types:\n"
+        "- Denial of Service (DoS)\n"
+        "- Reconnaissance\n"
+        "- Command Injection\n"
+        "- Backdoor\n\n"
+        "Natural attack rate: **7.28%**"
     )
-    window_idx = int(available_idx[slider_pos])
 
-    st.divider()
-
-    # Run inference for sidebar stats
-    result = inference.run_inference(window_idx)
-    score = result["anomaly_score"]
-    threshold = result["threshold"]
-    is_attack = result["is_attack"]
-    ground_truth = result["ground_truth"]
-
-    # Ground truth label
-    gt_label = "ATTACK" if ground_truth == 1 else "NORMAL"
-    gt_color = "red" if ground_truth == 1 else "green"
-    st.markdown(f"**Ground Truth:** :{gt_color}[{gt_label}]")
-
-    # Prediction
-    pred_label = "ATTACK" if is_attack else "NORMAL"
-    pred_color = "red" if is_attack else "green"
-    st.markdown(f"**Prediction:**   :{pred_color}[{pred_label}]")
-
-    st.metric("Anomaly Score", f"{score:.6f}")
-    st.metric("Threshold (p99)", f"{threshold:.6f}")
-    st.metric("Window Index", f"{window_idx:,}")
-
-    st.divider()
-
-    # Stats summary
-    all_scores = inference.get_scores()
-    all_labels = inference.get_labels()
-    n_total = len(all_scores)
-    n_attack_total = int((all_labels == 1).sum())
-    st.caption(f"Dataset: {n_total:,} windows | {n_attack_total:,} attack ({n_attack_total/n_total*100:.1f}%)")
+st.divider()
 
 # ---------------------------------------------------------------------------
-# Main area — Decision banner
+# Section 2 — The Approach
 # ---------------------------------------------------------------------------
-if is_attack:
-    st.error(f"🚨 ATTACK DETECTED   |   Score: {score:.6f}   |   Threshold: {threshold:.6f}")
-else:
-    st.success(f"✅ NORMAL TRAFFIC   |   Score: {score:.6f}   |   Threshold: {threshold:.6f}")
+st.header("Our Approach")
 
-st.caption(
-    f"Window {window_idx:,} · Ground truth: **{gt_label}** · "
-    f"{'Correct' if (is_attack == bool(ground_truth)) else 'Incorrect'} prediction"
+st.markdown(
+    "FLAIR uses an **unsupervised anomaly detection** strategy based on a "
+    "GRU autoencoder. The key insight is that ICS traffic, when operating normally, "
+    "occupies a compact, learnable region of feature space. An autoencoder trained "
+    "exclusively on normal traffic learns to reconstruct that region accurately — "
+    "but fails to reconstruct anomalous traffic it has never seen.\n\n"
+    "**No attack labels are needed for training or threshold selection.** "
+    "This makes FLAIR deployable in environments where labeled attack data is "
+    "unavailable or unrepresentative of future threats."
 )
 
-# ---------------------------------------------------------------------------
-# Row 1: Input heatmap + categorical table
-# ---------------------------------------------------------------------------
-col_heat, col_cat = st.columns([3, 1])
+col1, col2, col3, col4 = st.columns(4)
 
-with col_heat:
-    fig_input = input_heatmap(result["x_num_raw"], result["num_features"])
-    st.plotly_chart(fig_input, use_container_width=True)
+with col1:
+    st.markdown("### 1 · Capture")
+    st.markdown(
+        "Raw network traffic is parsed into **flow-level records** — one row per "
+        "connection. Flows capture packet counts, byte volumes, timing, and "
+        "protocol information without needing packet-level content."
+    )
+
+with col2:
+    st.markdown("### 2 · Window")
+    st.markdown(
+        "Flows are sorted by time and grouped into **sliding windows of 10 consecutive "
+        "flows**. Each window is the model's unit of analysis, capturing short-range "
+        "temporal context."
+    )
+
+with col3:
+    st.markdown("### 3 · Encode")
+    st.markdown(
+        "A **GRU encoder** compresses the 10-flow window into a 128-dimensional "
+        "latent vector. Categorical features (ports, protocol) pass through learned "
+        "embeddings before fusion with numeric features."
+    )
+
+with col4:
+    st.markdown("### 4 · Score")
+    st.markdown(
+        "A **GRU decoder** reconstructs the original window from the latent vector. "
+        "The mean squared reconstruction error is the **anomaly score** — high error "
+        "means the window looks unlike anything seen in normal training traffic."
+    )
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Section 3 — Features
+# ---------------------------------------------------------------------------
+st.header("Input Features")
+
+col_cat, col_num = st.columns([1, 2])
 
 with col_cat:
-    st.markdown("**Categorical Features**")
-    cat_df = pd.DataFrame(result["cat_decoded"])
-    cat_df.index = [f"Flow {i+1}" for i in range(len(cat_df))]
-    st.dataframe(cat_df, use_container_width=True, height=260)
-
-# ---------------------------------------------------------------------------
-# Row 2: Latent vector + Reconstruction comparison
-# ---------------------------------------------------------------------------
-col_latent, col_recon = st.columns([1, 2])
-
-with col_latent:
-    fig_latent = latent_bar(result["latent"])
-    st.plotly_chart(fig_latent, use_container_width=True)
-
-with col_recon:
-    fig_recon = reconstruction_comparison(
-        result["x_num_raw"],
-        result["x_hat_num"],
-        result["per_feat_err"],
-        result["num_features"],
+    st.markdown("**Categorical Features** (embedded)")
+    st.markdown(
+        "| Feature | Description |\n"
+        "|---------|-------------|\n"
+        "| Sport   | Source port number |\n"
+        "| Dport   | Destination port number |\n"
+        "| Proto   | Transport protocol (TCP/UDP/ICMP/…) |"
     )
-    st.plotly_chart(fig_recon, use_container_width=True)
+    st.caption(
+        "Mapped to learned 8-dimensional embedding vectors rather than raw integers, "
+        "allowing the model to capture semantic similarity between related ports and protocols."
+    )
+
+with col_num:
+    st.markdown("**Numeric Features** (z-score normalized)")
+    feat_cols = st.columns(3)
+    numeric_features = [
+        ("Mean", "Mean packet size"),
+        ("SrcPkts", "Source packet count"),
+        ("DstPkts", "Destination packet count"),
+        ("TotPkts", "Total packet count"),
+        ("SrcBytes", "Source byte count"),
+        ("DstBytes", "Destination byte count"),
+        ("TotBytes", "Total byte count"),
+        ("SrcLoad", "Source load (bps)"),
+        ("DstLoad", "Destination load (bps)"),
+        ("Load", "Total load (bps)"),
+        ("SrcRate", "Source packet rate (pps)"),
+        ("DstRate", "Destination packet rate (pps)"),
+        ("Rate", "Total packet rate (pps)"),
+        ("SrcLoss", "Source packet loss count"),
+        ("DstLoss", "Destination packet loss count"),
+        ("Loss", "Total packet loss count"),
+        ("pLoss", "Packet loss rate (%)"),
+        ("SrcJitter", "Source inter-arrival jitter"),
+        ("DstJitter", "Destination inter-arrival jitter"),
+        ("SIntPkt", "Source inter-packet time"),
+        ("DIntPkt", "Destination inter-packet time"),
+    ]
+    for i, (name, desc) in enumerate(numeric_features):
+        feat_cols[i % 3].markdown(f"**{name}** — {desc}")
+
+st.divider()
 
 # ---------------------------------------------------------------------------
-# Row 3: Anomaly gauge + Score distribution context
+# Section 4 — Results
 # ---------------------------------------------------------------------------
-col_gauge, col_dist = st.columns([1, 2])
+st.header("Results — 80/10/10 Temporal Split")
+st.caption(
+    "Trained on 80% of the dataset (normal windows only). "
+    "Threshold set on 10% validation set (p99 of normal scores). "
+    "Evaluated on 114,957 held-out test windows."
+)
 
-with col_gauge:
-    fig_gauge = anomaly_gauge(score, threshold)
-    st.plotly_chart(fig_gauge, use_container_width=True)
+col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
+col_m1.metric("Accuracy",     "98.96%")
+col_m2.metric("F1 Score",     "93.20%")
+col_m3.metric("Recall",       "98.08%",  help="Fraction of attacks correctly detected")
+col_m4.metric("Precision",    "88.79%")
+col_m5.metric("ROC AUC",      "0.9994",  help="Threshold-independent discrimination (1.0 = perfect)")
+col_m6.metric("False Alarm",  "0.97%",   help="Fraction of normal windows incorrectly flagged")
 
-with col_dist:
-    st.markdown("**Top-10 Most Anomalous Features**")
-    feat_err = result["per_feat_err"]
-    feat_names = result["num_features"]
-    top10_idx = np.argsort(feat_err)[::-1][:10]
-    top10_df = pd.DataFrame({
-        "Feature": [feat_names[i] for i in top10_idx],
-        "MSE": [f"{feat_err[i]:.6f}" for i in top10_idx],
-    })
-    top10_df.index = range(1, 11)
-    st.dataframe(top10_df, use_container_width=True, height=310)
+st.markdown("")
+
+col_dos, col_rec, col_ci, col_bd = st.columns(4)
+with col_dos:
+    st.success("**DoS Detection**\n\n# 99.5%\n7,491 / 7,530 attacks detected")
+with col_rec:
+    st.warning("**Reconn Detection**\n\n# 86.2%\n683 / 792 attacks detected")
+with col_ci:
+    st.warning("**Comm. Injection**\n\n# 80.8%\n21 / 26 attacks detected")
+with col_bd:
+    st.error("**Backdoor Detection**\n\n# 61.9%\n13 / 21 attacks detected")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Section 5 — How This Demo Works
+# ---------------------------------------------------------------------------
+st.header("How This Demo Works")
+
+st.markdown(
+    "👈 **Click \"1 Architecture Explainer\" in the sidebar** to begin the interactive walkthrough."
+)
+
+st.info(
+    "**This demo is an interactive replay system — it is not processing live network traffic.**\n\n"
+    "The FLAIR model was trained and evaluated on the WUSTL-IIoT-2021 dataset on a "
+    "high-performance computing cluster. Running the full evaluation (scoring all ~1.19M "
+    "windows) on a laptop CPU would take 30–60 minutes. To make the demo fast and "
+    "interactive, the anomaly scores were pre-computed during the evaluation run and "
+    "saved to `scores_80_10_10.csv`. The demo loads those scores at startup in seconds."
+)
+
+col_how1, col_how2, col_how3 = st.columns(3)
+
+with col_how1:
+    st.markdown("#### What is Pre-computed")
+    st.markdown(
+        "The **anomaly score** displayed for each window comes directly from "
+        "`scores_80_10_10.csv`, generated by running `flair_80_10_10.pt` over the "
+        "entire test set during the offline evaluation. The **threshold (0.3226)** "
+        "was set at the 99th percentile of validation-set scores during that same "
+        "run — no attack labels were used."
+    )
+
+with col_how2:
+    st.markdown("#### What is Computed Live")
+    st.markdown(
+        "Every time you move the slider, the selected window is fed through a **real "
+        "forward pass** of the model. The latent vector, decoder reconstruction, "
+        "per-feature error, and feature fusion diagram are all generated live. "
+        "You are seeing genuine model inference — just with the final anomaly score "
+        "sourced from the pre-computed evaluation for consistency with published metrics."
+    )
+
+with col_how3:
+    st.markdown("#### How to Explore")
+    st.markdown(
+        "Use the **Filter by class** control to browse normal-only or attack-only "
+        "windows. When browsing attacks, the sidebar shows the **attack type** "
+        "(DoS, Reconn, CommInj, Backdoor). Expand the **'How to read this'** "
+        "sections on the Architecture Explainer page for guidance on interpreting "
+        "each visualization."
+    )
